@@ -1,0 +1,218 @@
+# ============================================
+# Cursor & IDE
+# ============================================
+.cursor/
+
+# Visual Studio Code
+.vscode/
+.vscode-test/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.idea_modules/
+atlassian-ide-plugin.xml
+com_crashlytics_export_strings.xml
+crashlytics.properties
+crashlytics-build.properties
+fabric.properties
+
+# Visual Studio
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.ntvs*
+*.njsproj
+*.sln
+
+# Vim
+*.sw?
+*.swp
+*.swo
+*~
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Eclipse
+.project
+.classpath
+.settings/
+.metadata/
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.loadpath
+.recommenders
+
+# ============================================
+# Operating System
+# ============================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================
+# Node.js & Frontend
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-store/
+
+# Build output
+dist/
+dist-ssr/
+build/
+out/
+.next/
+.nuxt/
+.vite/
+.cache/
+.temp/
+.tmp/
+
+# Frontend dependencies lock files (optional, comment if you want to track them)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+.eggs/
+
+# ============================================
+# Java & Maven
+# ============================================
+target/
+*.class
+*.jar
+*.war
+*.ear
+!.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.properties
+
+# ============================================
+# Environment & Configuration
+# ============================================
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+.envrc
+
+# ============================================
+# Logs
+# ============================================
+logs/
+*.log
+log/
+*.log.*
+
+# ============================================
+# Database
+# ============================================
+*.db
+*.sqlite
+*.sqlite3
+test.db
+*.db-journal
+
+# ============================================
+# Test Coverage
+# ============================================
+coverage/
+coverage.xml
+htmlcov/
+.coverage
+.coverage.*
+*.cover
+.hypothesis/
+.pytest_cache/
+.nyc_output/
+
+# ============================================
+# Temporary & Cache
+# ============================================
+*.tmp
+*.temp
+.cache/
+.temp/
+.tmp/
+*.swp
+*.swo
+*~
+
+# ============================================
+# Process files
+# ============================================
+.pids.*
+*.pid
+*.seed
+*.pid.lock
+
+# ============================================
+# Project specific
+# ============================================
+.playwright-mcp
+
+# PID files (old project)
+w1/project-alpha/.pids.*
+
+# Documentation build
+docs/_build/
+site/
+
+# OS generated files
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# ============================================
+# Optional: Uncomment if needed
+# ============================================
+# Backup files
+# *.bak
+# *.backup
+# *.old
+
+# Archives
+# *.zip
+# *.tar
+# *.tar.gz
+# *.rar
+
+# Media files (if generated)
+# *.mp4
+# *.avi
+# *.mov
