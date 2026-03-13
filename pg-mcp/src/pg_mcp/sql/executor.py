@@ -33,17 +33,16 @@ class SQLExecutor:
         self.max_payload_size = max_payload_size
         self._allowed_schemas = allowed_schemas or DEFAULT_ALLOWED_SCHEMAS
 
-    async def execute_readonly(
+    async def execute_with_connection(
         self,
-        pool: Any,  # DatabasePool from db.pool_manager
+        conn: asyncpg.Connection,
         sql: str,
         max_rows: int,
     ) -> QueryResult:
         """
-        Execute SQL in a read-only transaction. Uses prepare() + fetch for
-        row limit; get_attributes() for column metadata (works with empty result).
+        Execute SQL using an existing connection. Caller is responsible for
+        acquire/release. Use for PoolManager semaphore-aware flow.
         """
-        conn = await pool.acquire()
         try:
             async with conn.transaction(readonly=True):
                 await conn.execute(
@@ -76,7 +75,6 @@ class SQLExecutor:
                 result_rows = [list(r.values()) for r in rows]
                 result_rows = self._truncate_fields(result_rows)
 
-                # Payload size check - trim rows if needed
                 while (
                     result_rows
                     and self._estimate_payload_size(result_rows)
@@ -92,6 +90,32 @@ class SQLExecutor:
                     truncated=truncated,
                     total_row_count=None,
                 )
+        except asyncpg.QueryCanceledError:
+            raise ExecutionError(
+                "EXECUTION_TIMEOUT",
+                "Query timed out",
+                retryable=False,
+            )
+        except asyncpg.PostgresError as e:
+            raise ExecutionError(
+                "EXECUTION_ERROR",
+                self._sanitize_error(e),
+                retryable=False,
+            )
+
+    async def execute_readonly(
+        self,
+        pool: Any,  # DatabasePool from db.pool_manager
+        sql: str,
+        max_rows: int,
+    ) -> QueryResult:
+        """
+        Execute SQL in a read-only transaction. Uses prepare() + fetch for
+        row limit; get_attributes() for column metadata (works with empty result).
+        """
+        conn = await pool.acquire()
+        try:
+            return await self.execute_with_connection(conn, sql, max_rows)
         except asyncpg.QueryCanceledError:
             raise ExecutionError(
                 "EXECUTION_TIMEOUT",

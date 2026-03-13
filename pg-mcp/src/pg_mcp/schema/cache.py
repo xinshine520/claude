@@ -60,6 +60,7 @@ class SchemaCache:
                     "by_schema": {},
                     "total_tables": 0,
                     "total_views": 0,
+                    "table_names": [],
                 }
 
     async def get_or_load(

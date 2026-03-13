@@ -349,10 +349,25 @@ class SchemaCollector:
             GROUP BY table_schema, table_type
             ORDER BY table_schema, table_type
         """)
+        table_names: list[str] = []
+        try:
+            names_result = await conn.fetch("""
+                SELECT table_schema, table_name
+                FROM information_schema.tables
+                WHERE table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+                ORDER BY table_schema, table_name
+            """)
+            table_names = [
+                f"{r.get('table_schema', '')}.{r.get('table_name', '')}"
+                for r in names_result
+            ]
+        except Exception:
+            pass
         summary: dict[str, Any] = {
             "by_schema": {},
             "total_tables": 0,
             "total_views": 0,
+            "table_names": table_names,
         }
         for r in result:
             schema = str(r.get("table_schema", ""))
