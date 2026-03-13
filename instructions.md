@@ -33,7 +33,7 @@
 
 使用 sub agent调用 /codex-code-review  让 codex review 整个代码，看其是否符合 @specs/0002-pg-mcp-design.md 和 @specs/0004-pg-mcp-impl-plan.md 。把 review 结果写到 ./specs/0006-pg-mcp-code-review.md 文件。
 
-根据 @specs/0006-pg-mcp-code-review.md 文档，使用 sub agent 修复 pg-mcp 整个代码，并将修复结果写到 ./specs/009-pg-mcp-code-review-result.md 文件。
+根据 @specs/0006-pg-mcp-code-review.md 文档，使用 sub agent 修复 pg-mcp 整个代码，并将修复结果写到 ./specs/0009-pg-mcp-code-review-result.md 文件。
 
 
 ## pg-mcp test plan
