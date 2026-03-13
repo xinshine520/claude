@@ -27,7 +27,7 @@
 
 ## 实现 pg-mcp
 
-根据 ./specs/w5/0004-pg-mcp-impl-plan.md 和 ./specs/w5/0002-pg-mcp-design.md 文档，使用 sub agent 完整实现 pg-mcp phase 0-4。代码放在 ./w5/pg-mcp 下。
+根据 @specs/0004-pg-mcp-impl-plan.md 和 @specs/0002-pg-mcp-design.md 文档，使用 sub agent 完整实现 pg-mcp phase 1-5。代码放在 ./pg-mcp 目录下。
 
 根据 ./specs/w5/0004-pg-mcp-impl-plan.md 和 ./specs/w5/0002-pg-mcp-design.md 文档，使用 sub agent 完整实现 pg-mcp phase 5-10。代码放在 ./w5/pg-mcp 下。
 
@@ -37,3 +37,7 @@
 ## pg-mcp test plan
 
 根据 @specs/0004-pg-mcp-impl-plan.md 和 @specs/0002-pg-mcp-design.md 文档，构建 pg-mcp 的测试计划，think ultra hard，文档放在 /specs/0007-pg-mcp-test-plan.md 文件中。之后调用 /codex-code-review  让 codex review  /specs/0007-pg-mcp-test-plan.md 文件，并构建 /specs/0008-pg-mcp-test-plan-review.md 文件。
+
+## pg-cmp 测试数据库
+
+根据 @specs/0001-pg-mcp-prd.md 在 ./pg-mcp/fixtures 下构建三个有意义的数据库，分别有少量，中等量级，以及大量的 table/view/types/index 等schema，且有足够多的数据。生成这三个数据库的 sql 文件，并构建 PowerShell 脚本 来重建这些测试数据库。
