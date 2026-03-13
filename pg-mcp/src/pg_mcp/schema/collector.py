@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg
+import structlog
 
 from pg_mcp.schema.models import (
     ColumnInfo,
@@ -16,6 +17,8 @@ from pg_mcp.schema.models import (
     IndexInfo,
     TableInfo,
 )
+
+logger = structlog.get_logger()
 
 
 class SchemaCollector:
@@ -106,6 +109,16 @@ class SchemaCollector:
           AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
     """
 
+    ROW_ESTIMATES_QUERY = """
+        SELECT c.relnamespace::regnamespace::text AS schema_name,
+               c.relname AS table_name,
+               c.reltuples::bigint AS row_estimate
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
+        WHERE c.relkind IN ('r', 'v', 'm')
+          AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+    """
+
     def __init__(self, collect_view_definitions: bool = True) -> None:
         self.collect_view_definitions = collect_view_definitions
 
@@ -123,40 +136,45 @@ class SchemaCollector:
         views_raw: list[asyncpg.Record] = []
         pk_raw: list[asyncpg.Record] = []
         table_comments_raw: list[asyncpg.Record] = []
+        row_estimates_raw: list[asyncpg.Record] = []
 
         try:
             tables_raw = await conn.fetch(self.TABLES_QUERY)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("schema_query_failed", query="TABLES_QUERY", error=str(e))
         try:
             columns_raw = await conn.fetch(self.COLUMNS_QUERY)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("schema_query_failed", query="COLUMNS_QUERY", error=str(e))
         try:
             fk_raw = await conn.fetch(self.FOREIGN_KEYS_QUERY)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("schema_query_failed", query="FOREIGN_KEYS_QUERY", error=str(e))
         try:
             indexes_raw = await conn.fetch(self.INDEXES_QUERY)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("schema_query_failed", query="INDEXES_QUERY", error=str(e))
         try:
             enums_raw = await conn.fetch(self.ENUM_TYPES_QUERY)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("schema_query_failed", query="ENUM_TYPES_QUERY", error=str(e))
         if self.collect_view_definitions:
             try:
                 views_raw = await conn.fetch(self.VIEW_DEFINITIONS_QUERY)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("schema_query_failed", query="VIEW_DEFINITIONS_QUERY", error=str(e))
         try:
             pk_raw = await conn.fetch(self.PRIMARY_KEYS_QUERY)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("schema_query_failed", query="PRIMARY_KEYS_QUERY", error=str(e))
         try:
             table_comments_raw = await conn.fetch(self.TABLE_COMMENTS_QUERY)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("schema_query_failed", query="TABLE_COMMENTS_QUERY", error=str(e))
+        try:
+            row_estimates_raw = await conn.fetch(self.ROW_ESTIMATES_QUERY)
+        except Exception as e:
+            logger.warning("schema_query_failed", query="ROW_ESTIMATES_QUERY", error=str(e))
 
         return self._assemble(
             database_name=database_name,
@@ -168,6 +186,7 @@ class SchemaCollector:
             views_raw=views_raw,
             pk_raw=pk_raw,
             table_comments_raw=table_comments_raw,
+            row_estimates_raw=row_estimates_raw,
         )
 
     def _assemble(
@@ -182,12 +201,21 @@ class SchemaCollector:
         views_raw: list[asyncpg.Record],
         pk_raw: list[asyncpg.Record],
         table_comments_raw: list[asyncpg.Record],
+        row_estimates_raw: list[asyncpg.Record] | None = None,
     ) -> DatabaseSchema:
         schemas_set: set[str] = set()
         tables_by_key: dict[tuple[str, str], TableInfo] = {}
         pk_set: set[tuple[str, str, str]] = set()
         view_defs: dict[tuple[str, str], str] = {}
         table_comments: dict[tuple[str, str], str] = {}
+        row_estimates: dict[tuple[str, str], int] = {}
+
+        for r in (row_estimates_raw or []):
+            schema = str(r.get("schema_name", "")).split(".")[-1]
+            table = str(r.get("table_name", ""))
+            estimate = r.get("row_estimate")
+            if estimate is not None:
+                row_estimates[(schema, table)] = int(estimate)
 
         for r in pk_raw:
             schema = str(r.get("table_schema", ""))
@@ -226,7 +254,7 @@ class SchemaCollector:
                 indexes=[],
                 comment=table_comments.get((schema, table)),
                 view_definition=view_defs.get((schema, table)),
-                row_estimate=None,
+                row_estimate=row_estimates.get((schema, table)),
             )
 
         cols_by_table: dict[tuple[str, str], list[ColumnInfo]] = {}

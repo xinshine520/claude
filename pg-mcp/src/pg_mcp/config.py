@@ -33,6 +33,7 @@ class LLMConfig(BaseSettings):
     model: str = "deepseek-chat"
     max_tokens: int = 4096
     temperature: float = 0.0
+    timeout: float = 30.0
 
 
 class ServerConfig(BaseSettings):
@@ -57,6 +58,7 @@ class ServerConfig(BaseSettings):
     collect_view_definitions: bool = True
     schema_cache_ttl: float = 3600.0
     max_tables_per_db: int = 500
+    allowed_schemas: list[str] = Field(default_factory=lambda: ["public"])
 
 
 def parse_databases_config(server_config: ServerConfig) -> dict[str, DatabaseConfig]:

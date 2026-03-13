@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import asynccontextmanager
 
 import asyncpg
 
@@ -119,9 +120,9 @@ class DatabasePool:
             self._on_failure()
             raise
 
-    def release(self, conn: asyncpg.Connection) -> None:
+    async def release(self, conn: asyncpg.Connection) -> None:
         if self.pool:
-            self.pool.release(conn)
+            await self.pool.release(conn)
 
     async def close(self) -> None:
         if self.pool:
@@ -152,16 +153,27 @@ class PoolManager:
                     "pool_create_failed", db=alias, error=str(e)
                 )
 
-    async def acquire(self, alias: str) -> asyncpg.Connection:
-        """Acquire connection with semaphore and circuit check."""
+    @asynccontextmanager
+    async def connection(self, alias: str):
+        """Async context manager holding the semaphore for the full connection lifetime."""
         async with self._semaphore:
             if alias not in self.pools:
                 raise ValueError(f"Unknown database: {alias}")
-            return await self.pools[alias].acquire()
+            conn = await self.pools[alias].acquire()
+            try:
+                yield conn
+            finally:
+                await self.pools[alias].release(conn)
 
-    def release(self, alias: str, conn: asyncpg.Connection) -> None:
+    async def acquire(self, alias: str) -> asyncpg.Connection:
+        """Acquire connection without semaphore. Use connection() for semaphore-scoped lifetime."""
+        if alias not in self.pools:
+            raise ValueError(f"Unknown database: {alias}")
+        return await self.pools[alias].acquire()
+
+    async def release(self, alias: str, conn: asyncpg.Connection) -> None:
         if alias in self.pools:
-            self.pools[alias].release(conn)
+            await self.pools[alias].release(conn)
 
     async def close(self) -> None:
         for pool in self.pools.values():

@@ -19,6 +19,7 @@ class LLMClient:
         model: str = "deepseek-chat",
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        timeout: float = 30.0,
     ) -> None:
         self._client = AsyncOpenAI(
             api_key=api_key,
@@ -27,6 +28,7 @@ class LLMClient:
         self._model = model
         self._max_tokens = max_tokens
         self._temperature = temperature
+        self._timeout = timeout
 
     async def chat(
         self,
@@ -47,6 +49,7 @@ class LLMClient:
                 ],
                 max_tokens=max_tokens or self._max_tokens,
                 temperature=self._temperature,
+                timeout=self._timeout,
             )
         except Exception as e:
             raise LLMError(str(e), retryable=True) from e

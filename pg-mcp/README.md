@@ -116,6 +116,12 @@ uv run pytest -m e2e
 
 See `fixtures/README.md` for test database setup (small, medium, large).
 
+## Security Notes
+
+### SSE Mode and Bearer Token Authentication
+
+When running in SSE mode (`--transport sse`), the `PG_MCP_ACCESS_TOKEN` config field is available but token enforcement is not implemented at the application level. For production deployments, use a reverse proxy (e.g., nginx, Caddy) to enforce Bearer token authentication before requests reach the server.
+
 ## License
 
 MIT

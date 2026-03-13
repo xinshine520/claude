@@ -44,7 +44,7 @@ async def test_get_or_load_lazy_loads():
     mock_conn = AsyncMock()
     mock_conn.fetchval = AsyncMock(return_value="testdb")
     mock_pool.acquire = AsyncMock(return_value=mock_conn)
-    mock_pool.release = MagicMock()
+    mock_pool.release = AsyncMock()
 
     mock_pm = MagicMock()
     mock_pm.pools = {"mydb": mock_pool}
@@ -94,7 +94,7 @@ async def test_refresh_clears_and_reloads():
     mock_conn = AsyncMock()
     mock_conn.fetchval = AsyncMock(return_value="testdb")
     mock_pool.acquire = AsyncMock(return_value=mock_conn)
-    mock_pool.release = MagicMock()
+    mock_pool.release = AsyncMock()
 
     mock_pm = MagicMock()
     mock_pm.pools = {"mydb": mock_pool}
@@ -175,7 +175,7 @@ async def test_concurrent_load_uses_lock():
     mock_conn = AsyncMock()
     mock_conn.fetchval = AsyncMock(return_value="testdb")
     mock_pool.acquire = AsyncMock(return_value=mock_conn)
-    mock_pool.release = MagicMock()
+    mock_pool.release = AsyncMock()
 
     mock_pm = MagicMock()
     mock_pm.pools = {"mydb": mock_pool}

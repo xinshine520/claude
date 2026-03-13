@@ -116,20 +116,8 @@ class SQLExecutor:
         conn = await pool.acquire()
         try:
             return await self.execute_with_connection(conn, sql, max_rows)
-        except asyncpg.QueryCanceledError:
-            raise ExecutionError(
-                "EXECUTION_TIMEOUT",
-                "Query timed out",
-                retryable=False,
-            )
-        except asyncpg.PostgresError as e:
-            raise ExecutionError(
-                "EXECUTION_ERROR",
-                self._sanitize_error(e),
-                retryable=False,
-            )
         finally:
-            pool.release(conn)
+            await pool.release(conn)
 
     def _truncate_fields(self, rows: list[list]) -> list[list]:
         """Truncate oversized field values."""
@@ -159,8 +147,8 @@ class SQLExecutor:
             r'\1 "[redacted]"',
             msg,
         )
-        msg = re.sub(r"DETAIL:.*", "DETAIL: [redacted]", msg)
-        msg = re.sub(r"HINT:.*", "HINT: [redacted]", msg)
-        msg = re.sub(r"CONTEXT:.*", "CONTEXT: [redacted]", msg)
-        msg = re.sub(r"LINE \d+:.*", "", msg)
+        msg = re.sub(r"DETAIL:.*", "DETAIL: [redacted]", msg, flags=re.DOTALL)
+        msg = re.sub(r"HINT:.*", "HINT: [redacted]", msg, flags=re.DOTALL)
+        msg = re.sub(r"CONTEXT:.*", "CONTEXT: [redacted]", msg, flags=re.DOTALL)
+        msg = re.sub(r"LINE \d+:.*", "", msg, flags=re.DOTALL)
         return msg.strip()

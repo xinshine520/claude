@@ -80,6 +80,7 @@ def _create_app_lifespan(server_config: ServerConfig, llm_config: LLMConfig):
             model=llm_config.model,
             max_tokens=llm_config.max_tokens,
             temperature=llm_config.temperature,
+            timeout=llm_config.timeout,
         )
         await pool_manager.initialize()
         await schema_cache.warm_up(pool_manager)
@@ -109,7 +110,7 @@ def create_mcp(server_config: ServerConfig, llm_config: LLMConfig) -> Any:
     @mcp.tool(
         name="query",
         description="Query PostgreSQL database using natural language. Returns SQL or query result.",
-        exclude_args=["ctx"],
+        exclude_args=["ctx"],  # FastMCP 2.x: keeps ctx out of the tool schema; use Depends() when available
     )
     async def query_tool(
         question: str,
@@ -156,6 +157,7 @@ class QueryPipeline:
             lock_timeout=self.config.lock_timeout,
             max_field_size=self.config.max_field_size,
             max_payload_size=self.config.max_payload_size,
+            allowed_schemas=self.config.allowed_schemas,
         )
         self.schema_retriever = SchemaRetriever(max_context_chars=8000)
         self.verifier = ResultVerifier(self.config, self.llm_client)
@@ -206,13 +208,10 @@ class QueryPipeline:
         if database not in self.pool_manager.pools:
             raise AmbiguousDBError(f"Database '{database}' not available")
         max_rows = request.max_rows or self.config.default_max_rows
-        conn = await self.pool_manager.acquire(database)
-        try:
+        async with self.pool_manager.connection(database) as conn:
             result = await self.executor.execute_with_connection(
                 conn, sql, max_rows
             )
-        finally:
-            self.pool_manager.release(database, conn)
 
         verification = None
         if self.verifier.should_verify(request.verify_result):
@@ -226,13 +225,12 @@ class QueryPipeline:
                 if verification.suggested_sql:
                     sql = verification.suggested_sql
                     self.validator.validate(sql)
-                    conn = await self.pool_manager.acquire(database)
-                    try:
+                    self._current_stage = "execute_sql"
+                    async with self.pool_manager.connection(database) as conn:
                         result = await self.executor.execute_with_connection(
                             conn, sql, max_rows
                         )
-                    finally:
-                        self.pool_manager.release(database, conn)
+                    self._current_stage = "verify_result"
                 else:
                     break
 
@@ -271,14 +269,11 @@ class QueryPipeline:
         for db in summaries:
             alias = db.get("name", "")
             table_names = db.get("table_names", [])
-            searchable = " ".join(t.lower() for t in table_names)
-            score = 0.0
-            for t in tokens:
-                if t in searchable:
-                    score += 1.0
-                for tn in table_names:
-                    if t in tn.lower():
-                        score += 2.0
+            table_names_lower = [t.lower() for t in table_names]
+            searchable = " ".join(table_names_lower)
+            score = sum(1.0 for t in tokens if t in searchable)
+            for tn_lower in table_names_lower:
+                score += sum(2.0 for t in tokens if t in tn_lower)
             if score > 0:
                 scores.append((score, alias))
         if not scores:

@@ -27,6 +27,7 @@ def make_deps(
     config.lock_timeout = "5s"
     config.max_field_size = 10240
     config.max_payload_size = 5242880
+    config.allowed_schemas = ["public"]
 
     pool_manager = mock_pool_manager or MagicMock()
     schema_cache = mock_schema_cache or MagicMock()
@@ -75,6 +76,8 @@ def mock_schema():
 @pytest.fixture
 def mock_pool_manager():
     """Pool manager with mock connection."""
+    from contextlib import asynccontextmanager
+
     pm = MagicMock()
     attr_id = MagicMock()
     attr_id.name = "id"
@@ -98,7 +101,13 @@ def mock_pool_manager():
 
     pm.pools = {"mydb": MagicMock()}
     pm.acquire = AsyncMock(return_value=conn)
-    pm.release = MagicMock()
+    pm.release = AsyncMock()
+
+    @asynccontextmanager
+    async def _connection(alias):
+        yield conn
+
+    pm.connection = _connection
     return pm
 
 
@@ -158,7 +167,6 @@ async def test_pipeline_result_mode(
     assert response.database == "mydb"
     assert response.result is not None
     assert response.error is None
-    mock_pool_manager.acquire.assert_called_once_with("mydb")
 
 
 @pytest.mark.asyncio

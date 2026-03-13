@@ -54,7 +54,7 @@ class SchemaCache:
                         conn
                     )
                 finally:
-                    db_pool.release(conn)
+                    await db_pool.release(conn)
             except Exception:
                 self._summaries[alias] = {
                     "by_schema": {},
@@ -88,7 +88,7 @@ class SchemaCache:
                     conn, database_name=db_name or alias
                 )
             finally:
-                db_pool.release(conn)
+                await db_pool.release(conn)
 
             if len(schema.tables) > self._max_tables:
                 import structlog
