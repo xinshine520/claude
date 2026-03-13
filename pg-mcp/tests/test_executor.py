@@ -6,8 +6,7 @@ import os
 
 import pytest
 
-from pg_mcp.errors import ExecutionError
-from pg_mcp.models import ColumnDef, QueryResult
+from pg_mcp.models import QueryResult
 from pg_mcp.sql.executor import SQLExecutor
 
 pytest.importorskip("asyncpg")

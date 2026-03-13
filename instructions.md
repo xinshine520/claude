@@ -31,7 +31,7 @@
 
 根据 @specs/0004-pg-mcp-impl-plan.md 和 @specs/0002-pg-mcp-design.md 文档，使用 sub agent 完整实现 pg-mcp phase 6到剩下所有。代码放在 ./pg-mcp 目录下。
 
-使用 sub agent调用 codex review skill 让 codex review 整个代码，看其是否符合 /specs/w5/0002-pg-mcp-design.md 和 ./specs/w5/0004-pg-mcp-impl-plan.md。把 review 结果写到 ./specs/w5/0006-pg-mcp-code-review.md 文件中。
+使用 sub agent调用 /codex-code-review  让 codex review 整个代码，看其是否符合 @specs/0002-pg-mcp-design.md 和 @specs/0004-pg-mcp-impl-plan.md 。把 review 结果写到 ./specs/0006-pg-mcp-code-review.md 文件。
 
 
 ## pg-mcp test plan
