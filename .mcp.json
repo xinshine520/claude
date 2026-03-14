@@ -1,0 +1,15 @@
+{
+  "pg-mcp": {
+    "command": "E:\\DevSample\\claude\\claude\\pg-mcp\\.venv\\Scripts\\python.exe",
+    "args": ["-m", "pg_mcp"],
+    "env": {
+      "PG_MCP_DATABASES": "pg_mcp_test",
+      "PG_MCP_PG_MCP_TEST_URL": "postgresql://postgres:123456@127.0.0.1:5432/pg_mcp_test",
+      "PG_MCP_LLM_API_KEY": "sk-eb62d7185a224320b44fc2929928dcac",
+      "PG_MCP_LLM_BASE_URL": "https://api.deepseek.com",
+      "PG_MCP_LLM_MODEL": "deepseek-chat",
+      "PG_MCP_VERIFY_MODE": "off"
+    },
+    "cwd": "E:\\DevSample\\claude\\claude\\pg-mcp"
+  }
+}

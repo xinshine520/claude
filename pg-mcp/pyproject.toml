@@ -18,6 +18,9 @@ dependencies = [
     "structlog>=24.0",
 ]
 
+[project.scripts]
+pg-mcp = "pg_mcp.__main__:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
