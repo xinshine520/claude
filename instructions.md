@@ -31,6 +31,8 @@
 
 根据 @specs/0004-pg-mcp-impl-plan.md 和 @specs/0002-pg-mcp-design.md 文档，使用 sub agent 完整实现 pg-mcp phase 6到剩下所有。代码放在 ./pg-mcp 目录下。
 
+根据 @specs/0004-pg-mcp-impl-plan.md 文档，使用 sub agent 完整实现 pg-mcp phase 9-11。代码放在 ./pg-mcp 目录下。
+
 使用 sub agent调用 /codex-code-review  让 codex review 整个代码，看其是否符合 @specs/0002-pg-mcp-design.md 和 @specs/0004-pg-mcp-impl-plan.md 。把 review 结果写到 ./specs/0006-pg-mcp-code-review.md 文件。
 
 根据 @specs/0006-pg-mcp-code-review.md 文档，使用 sub agent 修复 pg-mcp 整个代码，并将修复结果写到 ./specs/0009-pg-mcp-code-review-result.md 文件。
@@ -47,6 +49,17 @@
 
 ## 构建 pg-mcp 的测试用例
 
+根据这些 @pg-mcp/fixtures ，假设用户要用自然语言提问，然后 pg-mcp来生成相应的 sqL，帮我生成一个test.md的文档，里面包含各种对数据库内部数据的简单到复杂的提问
+
 对于 @w5/pg-mcp，将这个 mcp 添加到 claude code 中，打开一个 claude code headless cli 选择 @w5/pg-mcp/fixtures/TEST_QUERIES.md 下面的某些 query，运行，查看是否调用这个 mcp，结果是否符合预期
 
-直接用本地的 `uvx --refresh --from /Users/tchen/projects/mycode/bootcamp/ai/w5/pg-mcp pg-mcp` 来运行 mcp server
+直接用本地的 `uvx --refresh --from pg-mcp pg-mcp` 来运行 mcp server
+
+
+## 增加需求（已同步至 specs/0004-pg-mcp-impl-plan.md Phase 9-11）
+
+1.多数据库与安全控制​功能虽在设计中有承诺，但实际未能启用：服务器始终使用单一执行器，无法强制实施表 / 列访问限制或 EXPLAIN 策略，这可能导致请求访问错误数据库，且敏感对象无法得到保护。→ **Phase 9**
+
+2.弹性与可观测性模块（如速率限制、重试 / 退避机制、指标 / 追踪系统）仅停留在设计层面，尚未整合到实际请求处理流程中。→ **Phase 10**
+
+3.响应 / 模型缺陷（重复的 to_dict 方法、未使用的配置字段）及测试覆盖不足，导致当前系统行为偏离实施方案，且难以进行有效验证。→ **Phase 11**

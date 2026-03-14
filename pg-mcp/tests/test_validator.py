@@ -103,9 +103,17 @@ def test_lo_export_rejected(validator):
     assert exc.value.code == "BLOCKED_FUNCTION"
 
 
-def test_explain_allowed(validator):
-    """Valid: EXPLAIN SELECT 1"""
-    validator.validate("EXPLAIN SELECT 1")
+def test_explain_blocked_by_default(validator):
+    """EXPLAIN is blocked when allow_explain=False (default)."""
+    with pytest.raises(ValidationError) as exc:
+        validator.validate("EXPLAIN SELECT 1")
+    assert exc.value.code == "EXPLAIN_BLOCKED"
+
+
+def test_explain_allowed_when_enabled():
+    """EXPLAIN passes when allow_explain=True."""
+    v = SQLValidator(allow_explain=True)
+    v.validate("EXPLAIN SELECT 1")
 
 
 def test_explain_analyze_rejected(validator):

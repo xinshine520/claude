@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ColumnInfo(BaseModel):
     """Column metadata."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     name: str
     type: str
@@ -19,6 +21,8 @@ class ColumnInfo(BaseModel):
 class ForeignKeyInfo(BaseModel):
     """Foreign key constraint info."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     constraint_name: str
     source_column: str
     target_table: str
@@ -28,6 +32,8 @@ class ForeignKeyInfo(BaseModel):
 class IndexInfo(BaseModel):
     """Index metadata."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str
     columns: list[str] = Field(default_factory=list)
     index_type: str = "btree"
@@ -36,6 +42,8 @@ class IndexInfo(BaseModel):
 
 class TableInfo(BaseModel):
     """Table metadata."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     schema_name: str
     table_name: str
@@ -51,6 +59,8 @@ class TableInfo(BaseModel):
 class EnumTypeInfo(BaseModel):
     """Enum type metadata."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     schema_name: str
     type_name: str
     values: list[str] = Field(default_factory=list)
@@ -58,6 +68,8 @@ class EnumTypeInfo(BaseModel):
 
 class DatabaseSchema(BaseModel):
     """Full database schema metadata."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     database_name: str
     schemas: list[str] = Field(default_factory=list)

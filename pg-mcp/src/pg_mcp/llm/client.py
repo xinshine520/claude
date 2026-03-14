@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import random
 import re
 
+import openai
+import structlog
 from openai import AsyncOpenAI
 
-from pg_mcp.errors import LLMError, LLMParseError
+from pg_mcp.errors import LLMError, LLMParseError, RateLimitError
+
+logger = structlog.get_logger()
 
 
 class LLMClient:
@@ -20,6 +26,8 @@ class LLMClient:
         max_tokens: int = 4096,
         temperature: float = 0.0,
         timeout: float = 30.0,
+        max_retries: int = 3,
+        retry_base_delay: float = 1.0,
     ) -> None:
         self._client = AsyncOpenAI(
             api_key=api_key,
@@ -29,6 +37,8 @@ class LLMClient:
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._timeout = timeout
+        self._max_retries = max_retries
+        self._retry_base_delay = retry_base_delay
 
     async def chat(
         self,
@@ -37,30 +47,67 @@ class LLMClient:
         max_tokens: int | None = None,
     ) -> str:
         """
-        Send chat completion request.
+        Send chat completion request with exponential backoff retry.
+        Retries on HTTP 429 (RateLimitError) and 5xx (APIStatusError).
         Raises LLMError on API failure, LLMParseError on invalid response.
         """
-        try:
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
-                ],
-                max_tokens=max_tokens or self._max_tokens,
-                temperature=self._temperature,
-                timeout=self._timeout,
-            )
-        except Exception as e:
-            raise LLMError(str(e), retryable=True) from e
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = await self._client.chat.completions.create(
+                    model=self._model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message},
+                    ],
+                    max_tokens=max_tokens or self._max_tokens,
+                    temperature=self._temperature,
+                    timeout=self._timeout,
+                )
+            except openai.RateLimitError as e:
+                if attempt < self._max_retries:
+                    delay = min(
+                        self._retry_base_delay * (2 ** attempt) + random.uniform(0, 1),
+                        30.0,
+                    )
+                    logger.warning(
+                        "llm_retry",
+                        attempt=attempt,
+                        delay=delay,
+                        error=str(e),
+                        reason="rate_limit",
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise RateLimitError(str(e)) from e
+            except openai.APIStatusError as e:
+                if e.status_code >= 500 and attempt < self._max_retries:
+                    delay = min(
+                        self._retry_base_delay * (2 ** attempt) + random.uniform(0, 1),
+                        30.0,
+                    )
+                    logger.warning(
+                        "llm_retry",
+                        attempt=attempt,
+                        delay=delay,
+                        error=str(e),
+                        reason="server_error",
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise LLMError(str(e), retryable=e.status_code >= 500) from e
+            except Exception as e:
+                raise LLMError(str(e), retryable=True) from e
 
-        if not response.choices:
-            raise LLMParseError("Empty response from LLM")
+            if not response.choices:
+                raise LLMParseError("Empty response from LLM")
 
-        content = response.choices[0].message.content
-        if content is None:
-            raise LLMParseError("No content in LLM response")
-        return content.strip()
+            content = response.choices[0].message.content
+            if content is None:
+                raise LLMParseError("No content in LLM response")
+            return content.strip()
+
+        # Exhausted retries without success (should be unreachable)
+        raise LLMError("Exhausted all retry attempts", retryable=False)
 
     def extract_sql(self, response: str) -> str:
         """

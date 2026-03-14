@@ -49,25 +49,45 @@ python -m pg_mcp
 python -m pg_mcp --transport sse --port 8000
 ```
 
+**HTTP / Streamable HTTP (recommended for Cursor URL mode)**:
+
+```bash
+python -m pg_mcp --transport http --port 18080
+```
+
+Use `--transport http` when connecting via URL. Cursor expects a single endpoint for both GET and POST; SSE uses separate paths (`/sse` for GET, `/messages/` for POST) which can cause `405 Method Not Allowed` on POST.
+
 ### 4. Cursor MCP config
+
+**stdio (spawn process)**:
 
 ```json
 {
-  "mcpServers": {
-    "pg-mcp": {
-      "command": "python",
-      "args": ["-m", "pg_mcp"],
-      "env": {
-        "PG_MCP_DATABASES": "mydb",
-        "PG_MCP_MYDB_URL": "postgresql://user:pass@localhost:5432/mydb",
-        "PG_MCP_LLM_API_KEY": "sk-...",
-        "PG_MCP_LLM_BASE_URL": "https://api.deepseek.com",
-        "PG_MCP_LLM_MODEL": "deepseek-chat"
-      }
+  "pg-mcp": {
+    "command": "python",
+    "args": ["-m", "pg_mcp"],
+    "env": {
+      "PG_MCP_DATABASES": "mydb",
+      "PG_MCP_MYDB_URL": "postgresql://user:pass@localhost:5432/mydb",
+      "PG_MCP_LLM_API_KEY": "sk-...",
+      "PG_MCP_LLM_BASE_URL": "https://api.deepseek.com",
+      "PG_MCP_LLM_MODEL": "deepseek-chat"
     }
   }
 }
 ```
+
+**URL (remote server, use `--transport http`)**:
+
+```json
+{
+  "pg-mcp": {
+    "url": "http://127.0.0.1:18080/mcp"
+  }
+}
+```
+
+Start the server with: `uv run pg-mcp --transport http --port 18080`
 
 ## Configuration Reference
 
@@ -115,6 +135,59 @@ uv run pytest -m e2e
 ### Fixtures
 
 See `fixtures/README.md` for test database setup (small, medium, large).
+
+## Advanced Features (Phase 9–11)
+
+### Phase 9: Per-Database Security Control
+
+Each database can have its own access rules via environment variables:
+
+| Variable | Format | Description |
+|----------|--------|-------------|
+| `PG_MCP_{ALIAS}_ALLOWED_SCHEMAS` | Comma-separated | Override global `search_path` (e.g. `analytics,reporting`) |
+| `PG_MCP_{ALIAS}_ALLOWED_TABLES` | Comma-separated | Whitelist: only these tables can be accessed (e.g. `users,orders`) |
+| `PG_MCP_{ALIAS}_DENIED_TABLES` | Comma-separated | Blacklist: these tables are blocked (e.g. `secrets,audit_log`) |
+| `PG_MCP_{ALIAS}_ALLOW_EXPLAIN` | `true`/`false` | Allow `EXPLAIN` (default: `false`) |
+| `PG_MCP_{ALIAS}_MAX_ROWS_OVERRIDE` | Integer | Per-db row limit override |
+
+**Example `.env`** (database `analytics` with strict access):
+
+```bash
+PG_MCP_DATABASES=analytics,readonly
+PG_MCP_ANALYTICS_URL=postgresql://user:pass@localhost:5432/analytics
+PG_MCP_ANALYTICS_ALLOWED_SCHEMAS=analytics,reporting
+PG_MCP_ANALYTICS_ALLOWED_TABLES=daily_metrics,revenue_summary
+PG_MCP_ANALYTICS_MAX_ROWS_OVERRIDE=1000
+
+PG_MCP_READONLY_URL=postgresql://user:pass@localhost:5432/readonly
+PG_MCP_READONLY_DENIED_TABLES=secrets,passwords
+PG_MCP_READONLY_ALLOW_EXPLAIN=true
+```
+
+---
+
+### Phase 10: Resilience & Observability
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PG_MCP_RATE_LIMIT_RPM` | `60` | Max requests per minute (0 or negative = disabled) |
+| `PG_MCP_LLM_MAX_RETRIES` | `3` | Max retries for 429/5xx LLM errors |
+| `PG_MCP_LLM_RETRY_BASE_DELAY` | `1.0` | Base delay (seconds) for exponential backoff |
+| `PG_MCP_METRICS_ENABLED` | `true` | Emit pipeline metrics via structlog |
+
+**Behavior:**
+
+- **Rate limiting**: Sliding-window; over-limit requests return `RateLimitError` (stage `rate_limit`).
+- **LLM retry**: On 429 (rate limit) or 5xx (server error), LLM calls retry with exponential backoff (1s → 2s → 4s …, cap 30s). 4xx (client error) are not retried.
+- **Metrics**: When enabled, each request logs a `pipeline_metrics` event with stage durations (e.g. `ensure_schema_loaded`, `generate_sql`, `execute_sql`). Ensure `LOG_LEVEL=INFO` or `DEBUG` to see them.
+
+---
+
+### Phase 11: Model & Test Improvements
+
+Internal changes only (no new config): response model serialization fixes and higher test coverage. No user-facing configuration.
+
+---
 
 ## Security Notes
 

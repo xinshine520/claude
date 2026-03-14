@@ -273,3 +273,137 @@ async def test_pipeline_unknown_database(mock_llm, mock_schema_cache):
     response = await pipeline.execute(request)
     assert response.error is not None
     assert "nonexistent" in response.error.message.lower() or "not" in response.error.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_ambiguous_db_no_databases(mock_llm, mock_schema_cache):
+    """No databases configured returns AmbiguousDBError."""
+    pm = MagicMock()
+    pm.pools = {}  # empty
+    deps = make_deps(
+        mock_llm=mock_llm,
+        mock_pool_manager=pm,
+        mock_schema_cache=mock_schema_cache,
+    )
+    pipeline = QueryPipeline(deps)
+    request = QueryRequest(
+        question="List users",
+        database=None,
+        return_mode=ReturnMode.SQL,
+    )
+    response = await pipeline.execute(request)
+    assert response.error is not None
+    assert response.error.code == "DB_AMBIGUOUS"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_multi_database_routes_correctly(mock_schema_cache):
+    """Single-db pool always routes to that database."""
+    llm = AsyncMock()
+    llm.chat = AsyncMock(return_value="SELECT 1")
+    llm.extract_sql = MagicMock(return_value="SELECT 1")
+
+    pm = MagicMock()
+    pm.pools = {"analytics": MagicMock()}
+    deps = make_deps(
+        mock_llm=llm,
+        mock_pool_manager=pm,
+        mock_schema_cache=mock_schema_cache,
+    )
+    pipeline = QueryPipeline(deps)
+    request = QueryRequest(
+        question="Get data",
+        database=None,
+        return_mode=ReturnMode.SQL,
+    )
+    response = await pipeline.execute(request)
+    assert response.error is None
+    assert response.database == "analytics"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_per_db_validator_table_blacklist(mock_schema_cache):
+    """Per-db table blacklist blocks the query in the pipeline."""
+    from pg_mcp.config import DatabaseConfig
+
+    llm = AsyncMock()
+    llm.chat = AsyncMock(return_value="SELECT * FROM secrets")
+    llm.extract_sql = MagicMock(return_value="SELECT * FROM secrets")
+
+    pm = MagicMock()
+    pm.pools = {"mydb": MagicMock()}
+
+    config = MagicMock()
+    config.default_max_rows = 100
+    config.verify_mode = "off"
+    config.verify_sample_rows = 5
+    config.max_sql_length = 10000
+    config.blocked_functions = []
+    config.statement_timeout = "30s"
+    config.lock_timeout = "5s"
+    config.max_field_size = 10240
+    config.max_payload_size = 5242880
+    config.allowed_schemas = ["public"]
+
+    db_config = DatabaseConfig(database="mydb", denied_tables=["secrets"])
+
+    deps = {
+        "config": config,
+        "pool_manager": pm,
+        "schema_cache": mock_schema_cache,
+        "llm_client": llm,
+        "db_configs": {"mydb": db_config},
+    }
+    pipeline = QueryPipeline(deps)
+    request = QueryRequest(
+        question="Show secrets",
+        database="mydb",
+        return_mode=ReturnMode.SQL,
+    )
+    response = await pipeline.execute(request)
+    assert response.error is not None
+    assert response.error.code == "VALIDATION_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_per_db_validator_allow_explain(mock_schema_cache):
+    """Per-db allow_explain=True lets EXPLAIN pass in the pipeline."""
+    from pg_mcp.config import DatabaseConfig
+
+    llm = AsyncMock()
+    llm.chat = AsyncMock(return_value="EXPLAIN SELECT 1")
+    llm.extract_sql = MagicMock(return_value="EXPLAIN SELECT 1")
+
+    pm = MagicMock()
+    pm.pools = {"mydb": MagicMock()}
+
+    config = MagicMock()
+    config.default_max_rows = 100
+    config.verify_mode = "off"
+    config.verify_sample_rows = 5
+    config.max_sql_length = 10000
+    config.blocked_functions = []
+    config.statement_timeout = "30s"
+    config.lock_timeout = "5s"
+    config.max_field_size = 10240
+    config.max_payload_size = 5242880
+    config.allowed_schemas = ["public"]
+
+    db_config = DatabaseConfig(database="mydb", allow_explain=True)
+
+    deps = {
+        "config": config,
+        "pool_manager": pm,
+        "schema_cache": mock_schema_cache,
+        "llm_client": llm,
+        "db_configs": {"mydb": db_config},
+    }
+    pipeline = QueryPipeline(deps)
+    request = QueryRequest(
+        question="Explain query",
+        database="mydb",
+        return_mode=ReturnMode.SQL,
+    )
+    response = await pipeline.execute(request)
+    assert response.error is None
+    assert response.sql == "EXPLAIN SELECT 1"

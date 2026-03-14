@@ -9,8 +9,10 @@ from typing import Any
 import structlog
 
 from pg_mcp.config import (
+    DatabaseConfig,
     LLMConfig,
     ServerConfig,
+    parse_databases_config,
 )
 from pg_mcp.db.pool_manager import PoolManager
 from pg_mcp.errors import (
@@ -29,6 +31,8 @@ from pg_mcp.llm.prompts import (
 )
 from pg_mcp.llm.schema_retriever import SchemaRetriever, render_schema_context
 from pg_mcp.logging import configure_logging
+from pg_mcp.middleware.metrics import MetricsCollector, timed
+from pg_mcp.middleware.rate_limiter import RateLimiter
 from pg_mcp.models import (
     ErrorDetail,
     QueryRequest,
@@ -57,6 +61,21 @@ EXCEPTION_MAP: dict[type[Exception], tuple[str | None, str | None, bool | None]]
 
 def _load_config() -> tuple[ServerConfig, LLMConfig]:
     """Load server and LLM config from environment."""
+    import os
+    from pathlib import Path
+
+    # Load .env into os.environ so parse_databases_config can read PG_MCP_{ALIAS}_URL vars
+    env_file = Path(".env")
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip().strip("'\"")
+                if key and key not in os.environ:
+                    os.environ[key] = val
+
     server_config = ServerConfig()
     llm_config = LLMConfig()
     return server_config, llm_config
@@ -68,6 +87,7 @@ def _create_app_lifespan(server_config: ServerConfig, llm_config: LLMConfig):
     @asynccontextmanager
     async def lifespan(_mcp: Any):
         configure_logging(server_config.log_level)
+        db_configs = parse_databases_config(server_config)
         pool_manager = PoolManager(server_config)
         schema_cache = SchemaCache(
             ttl=server_config.schema_cache_ttl,
@@ -81,7 +101,11 @@ def _create_app_lifespan(server_config: ServerConfig, llm_config: LLMConfig):
             max_tokens=llm_config.max_tokens,
             temperature=llm_config.temperature,
             timeout=llm_config.timeout,
+            max_retries=server_config.llm_max_retries,
+            retry_base_delay=server_config.llm_retry_base_delay,
         )
+        rate_limiter = RateLimiter(rpm=server_config.rate_limit_rpm)
+        metrics = MetricsCollector(enabled=server_config.metrics_enabled)
         await pool_manager.initialize()
         await schema_cache.warm_up(pool_manager)
         try:
@@ -91,6 +115,9 @@ def _create_app_lifespan(server_config: ServerConfig, llm_config: LLMConfig):
                 "pool_manager": pool_manager,
                 "schema_cache": schema_cache,
                 "llm_client": llm_client,
+                "db_configs": db_configs,
+                "rate_limiter": rate_limiter,
+                "metrics": metrics,
             }
         finally:
             await pool_manager.close()
@@ -110,7 +137,6 @@ def create_mcp(server_config: ServerConfig, llm_config: LLMConfig) -> Any:
     @mcp.tool(
         name="query",
         description="Query PostgreSQL database using natural language. Returns SQL or query result.",
-        exclude_args=["ctx"],  # FastMCP 2.x: keeps ctx out of the tool schema; use Depends() when available
     )
     async def query_tool(
         question: str,
@@ -122,6 +148,22 @@ def create_mcp(server_config: ServerConfig, llm_config: LLMConfig) -> Any:
     ) -> dict:
         """MCP tool entry: run full query pipeline."""
         deps = ctx.lifespan_context
+
+        # Phase 10: request-level rate limiting
+        rate_limiter: RateLimiter | None = deps.get("rate_limiter")
+        if rate_limiter is not None:
+            try:
+                await rate_limiter.acquire()
+            except RateLimitError as e:
+                return QueryResponse(
+                    error=ErrorDetail(
+                        code="RATE_LIMITED",
+                        message=str(e),
+                        stage="rate_limit",
+                        retryable=True,
+                    )
+                ).model_dump(exclude_none=True)
+
         request = QueryRequest(
             question=question,
             database=database,
@@ -148,19 +190,29 @@ class QueryPipeline:
         self.schema_cache: SchemaCache = deps["schema_cache"]
         self.llm_client: LLMClient = deps["llm_client"]
         self._current_stage = "init"
-        self.validator = SQLValidator(
+        self.schema_retriever = SchemaRetriever(max_context_chars=8000)
+        self.verifier = ResultVerifier(self.config, self.llm_client)
+
+    def _get_db_validator(self, db_config: DatabaseConfig | None) -> SQLValidator:
+        """Create a SQLValidator with per-database security settings."""
+        return SQLValidator(
             max_length=self.config.max_sql_length,
             blocked_functions=set(self.config.blocked_functions),
+            allow_explain=db_config.allow_explain if db_config else False,
+            table_whitelist=db_config.allowed_tables if db_config else None,
+            table_blacklist=db_config.denied_tables if db_config else None,
         )
-        self.executor = SQLExecutor(
+
+    def _get_db_executor(self, db_config: DatabaseConfig | None) -> SQLExecutor:
+        """Create a SQLExecutor with per-database settings."""
+        return SQLExecutor(
             statement_timeout=self.config.statement_timeout,
             lock_timeout=self.config.lock_timeout,
             max_field_size=self.config.max_field_size,
             max_payload_size=self.config.max_payload_size,
             allowed_schemas=self.config.allowed_schemas,
+            db_config=db_config,
         )
-        self.schema_retriever = SchemaRetriever(max_context_chars=8000)
-        self.verifier = ResultVerifier(self.config, self.llm_client)
 
     async def execute(self, request: QueryRequest) -> QueryResponse:
         """Run the full pipeline. Catches known exceptions and maps to ErrorDetail."""
@@ -187,19 +239,29 @@ class QueryPipeline:
             )
 
     async def _run(self, request: QueryRequest) -> QueryResponse:
+        metrics: MetricsCollector | None = self.deps.get("metrics")
+        db_configs: dict[str, DatabaseConfig] = self.deps.get("db_configs") or {}
+
         self._current_stage = "resolve_database"
         database = await self._resolve_database(request)
         if not database:
             raise AmbiguousDBError("Could not determine database")
 
+        db_config = db_configs.get(database)
+        validator = self._get_db_validator(db_config)
+        executor = self._get_db_executor(db_config)
+
         self._current_stage = "ensure_schema_loaded"
-        schema = await self.schema_cache.get_or_load(database, self.pool_manager)
+        async with timed(metrics, "ensure_schema_loaded"):
+            schema = await self.schema_cache.get_or_load(database, self.pool_manager)
 
         self._current_stage = "generate_sql"
-        sql = await self._generate_sql(request.question, schema)
+        async with timed(metrics, "generate_sql"):
+            sql = await self._generate_sql(request.question, schema)
 
         self._current_stage = "validate_sql"
-        self.validator.validate(sql)
+        async with timed(metrics, "validate_sql"):
+            validator.validate(sql)
 
         if request.return_mode == ReturnMode.SQL:
             return QueryResponse(sql=sql, database=database)
@@ -208,31 +270,36 @@ class QueryPipeline:
         if database not in self.pool_manager.pools:
             raise AmbiguousDBError(f"Database '{database}' not available")
         max_rows = request.max_rows or self.config.default_max_rows
-        async with self.pool_manager.connection(database) as conn:
-            result = await self.executor.execute_with_connection(
-                conn, sql, max_rows
-            )
+        async with timed(metrics, "execute_sql"):
+            async with self.pool_manager.connection(database) as conn:
+                result = await executor.execute_with_connection(conn, sql, max_rows)
 
         verification = None
         if self.verifier.should_verify(request.verify_result):
             self._current_stage = "verify_result"
             for attempt in range(self.MAX_VERIFY_RETRIES + 1):
-                verification = await self.verifier.verify(
-                    request.question, sql, result
-                )
+                async with timed(metrics, "verify_result"):
+                    verification = await self.verifier.verify(
+                        request.question, sql, result
+                    )
                 if verification.match == "yes" or attempt == self.MAX_VERIFY_RETRIES:
                     break
                 if verification.suggested_sql:
                     sql = verification.suggested_sql
-                    self.validator.validate(sql)
+                    async with timed(metrics, "validate_sql"):
+                        validator.validate(sql)
                     self._current_stage = "execute_sql"
-                    async with self.pool_manager.connection(database) as conn:
-                        result = await self.executor.execute_with_connection(
-                            conn, sql, max_rows
-                        )
+                    async with timed(metrics, "execute_sql"):
+                        async with self.pool_manager.connection(database) as conn:
+                            result = await executor.execute_with_connection(
+                                conn, sql, max_rows
+                            )
                     self._current_stage = "verify_result"
                 else:
                     break
+
+        if metrics:
+            metrics.emit()
 
         self._current_stage = "build_response"
         return QueryResponse(

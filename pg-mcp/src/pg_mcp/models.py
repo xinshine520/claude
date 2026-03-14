@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ReturnMode(str, Enum):
@@ -25,6 +25,8 @@ class VerifyMode(str, Enum):
 class QueryRequest(BaseModel):
     """Natural language query request."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     question: str
     database: str | None = None
     return_mode: ReturnMode = ReturnMode.RESULT
@@ -35,12 +37,16 @@ class QueryRequest(BaseModel):
 class ColumnDef(BaseModel):
     """Column definition for result metadata."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str
     type: str
 
 
 class QueryResult(BaseModel):
     """Query execution result."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     columns: list[ColumnDef]
     rows: list[list] = Field(default_factory=list)
@@ -52,6 +58,8 @@ class QueryResult(BaseModel):
 class VerificationResult(BaseModel):
     """Semantic verification result from LLM."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     match: str  # "yes" | "no" | "partial" | "unknown"
     explanation: str
     suggested_sql: str | None = None
@@ -59,6 +67,8 @@ class VerificationResult(BaseModel):
 
 class ErrorDetail(BaseModel):
     """Structured error in response."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     code: str
     message: str
@@ -68,6 +78,8 @@ class ErrorDetail(BaseModel):
 
 class QueryResponse(BaseModel):
     """Unified query response."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     sql: str | None = None
     database: str | None = None

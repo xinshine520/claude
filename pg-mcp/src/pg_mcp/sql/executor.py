@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import asyncpg
 
 from pg_mcp.errors import ExecutionError
 from pg_mcp.models import ColumnDef, QueryResult
+
+if TYPE_CHECKING:
+    from pg_mcp.config import DatabaseConfig
 
 
 # Allowed schemas for search_path (whitelist)
@@ -26,12 +29,26 @@ class SQLExecutor:
         max_field_size: int = 10240,
         max_payload_size: int = 5242880,
         allowed_schemas: list[str] | None = None,
+        db_config: DatabaseConfig | None = None,
     ):
         self.statement_timeout = statement_timeout
         self.lock_timeout = lock_timeout
         self.max_field_size = max_field_size
         self.max_payload_size = max_payload_size
         self._allowed_schemas = allowed_schemas or DEFAULT_ALLOWED_SCHEMAS
+        self._db_config = db_config
+
+    def _effective_schemas(self) -> list[str]:
+        """Return per-db schemas if set, else fall back to global allowed_schemas."""
+        if self._db_config and self._db_config.allowed_schemas:
+            return self._db_config.allowed_schemas
+        return self._allowed_schemas
+
+    def _effective_max_rows(self, max_rows: int) -> int:
+        """Return per-db max_rows_override if set, else caller-provided value."""
+        if self._db_config and self._db_config.max_rows_override is not None:
+            return self._db_config.max_rows_override
+        return max_rows
 
     async def execute_with_connection(
         self,
@@ -43,6 +60,7 @@ class SQLExecutor:
         Execute SQL using an existing connection. Caller is responsible for
         acquire/release. Use for PoolManager semaphore-aware flow.
         """
+        effective_max_rows = self._effective_max_rows(max_rows)
         try:
             async with conn.transaction(readonly=True):
                 await conn.execute(
@@ -52,11 +70,17 @@ class SQLExecutor:
                     f"SET LOCAL lock_timeout = '{self.lock_timeout}'"
                 )
                 schemas_str = ", ".join(
-                    f'"{s}"' for s in self._allowed_schemas
+                    f'"{s}"' for s in self._effective_schemas()
                 )
                 await conn.execute(f"SET LOCAL search_path = {schemas_str}")
 
-                prepared = await conn.prepare(sql)
+                # Wrap query in LIMIT subquery to avoid fetching excessive rows
+                sql_clean = sql.rstrip("; \t\n")
+                limited_sql = (
+                    f"SELECT * FROM ({sql_clean}) AS _pg_mcp_q"
+                    f" LIMIT {effective_max_rows + 1}"
+                )
+                prepared = await conn.prepare(limited_sql)
                 attrs = prepared.get_attributes()
 
                 columns = [
@@ -67,10 +91,10 @@ class SQLExecutor:
                     for attr in attrs
                 ]
 
-                rows = await prepared.fetch(max_rows + 1)
-                truncated = len(rows) > max_rows
+                rows = await prepared.fetch()
+                truncated = len(rows) > effective_max_rows
                 if truncated:
-                    rows = rows[:max_rows]
+                    rows = rows[:effective_max_rows]
 
                 result_rows = [list(r.values()) for r in rows]
                 result_rows = self._truncate_fields(result_rows)

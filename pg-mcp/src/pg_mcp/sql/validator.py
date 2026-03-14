@@ -86,6 +86,9 @@ class SQLValidator:
         max_length: int = 10000,
         blocked_functions: set[str] | frozenset[str] | list[str] | None = None,
         allow_explain_analyze: bool = False,
+        allow_explain: bool = False,
+        table_whitelist: list[str] | None = None,
+        table_blacklist: list[str] | None = None,
     ):
         self.max_length = max_length
         self.blocked_functions = (
@@ -93,6 +96,9 @@ class SQLValidator:
             | frozenset(blocked_functions or [])
         )
         self.allow_explain_analyze = allow_explain_analyze
+        self.allow_explain = allow_explain
+        self.table_whitelist = [t.lower() for t in table_whitelist] if table_whitelist else None
+        self.table_blacklist = [t.lower() for t in table_blacklist] if table_blacklist else None
 
     def validate(self, sql: str) -> exp.Expression:
         """
@@ -160,7 +166,7 @@ class SQLValidator:
         # SELECT INTO check (walk full tree including CTEs)
         self._check_select_into(root)
 
-        # Walk full AST (including CTE bodies) for blocked nodes
+        # Walk full AST (including CTE bodies) for blocked nodes and functions
         for node in root.walk():
             if isinstance(node, BLOCKED_STATEMENT_TYPES):
                 raise ValidationError(
@@ -175,6 +181,10 @@ class SQLValidator:
                         "BLOCKED_FUNCTION",
                         f"Function '{func_name}' is not allowed",
                     )
+
+        # Table access validation (whitelist / blacklist)
+        if self.table_whitelist is not None or self.table_blacklist is not None:
+            self._check_table_access(root)
 
         return statements[0]
 
@@ -203,10 +213,60 @@ class SQLValidator:
                 raise ValidationError("SELECT_INTO", "SELECT INTO is not allowed")
 
     def _check_explain(self, ast: exp.Expression) -> None:
-        """Allow EXPLAIN but block EXPLAIN ANALYZE by default."""
+        """Check EXPLAIN permissions: block by default, allow with allow_explain=True."""
         sql_upper = (ast.sql(dialect="postgres") or "").upper()
-        if "ANALYZE" in sql_upper and not self.allow_explain_analyze:
-            raise ValidationError(
-                "EXPLAIN_ANALYZE",
-                "EXPLAIN ANALYZE is not allowed by default",
-            )
+        has_analyze = "ANALYZE" in sql_upper
+
+        if has_analyze:
+            if not self.allow_explain_analyze:
+                raise ValidationError(
+                    "EXPLAIN_ANALYZE",
+                    "EXPLAIN ANALYZE is not allowed by default",
+                )
+        else:
+            if not self.allow_explain:
+                raise ValidationError(
+                    "EXPLAIN_BLOCKED",
+                    "EXPLAIN is not allowed; set allow_explain=True to enable",
+                )
+
+    def _check_table_access(self, ast: exp.Expression) -> None:
+        """Validate table references against whitelist and blacklist."""
+        for node in ast.walk():
+            if not isinstance(node, exp.Table) or not node.name:
+                continue
+
+            table_name = node.name.lower()
+            schema_name = (node.db or "").lower()
+            full_name = f"{schema_name}.{table_name}" if schema_name else table_name
+            display_name = full_name
+
+            if self.table_whitelist is not None:
+                allowed = any(
+                    (
+                        entry == full_name
+                        if "." in entry
+                        else entry == table_name
+                    )
+                    for entry in self.table_whitelist
+                )
+                if not allowed:
+                    raise ValidationError(
+                        "TABLE_NOT_ALLOWED",
+                        f"Table '{display_name}' is not in the allowed list",
+                    )
+
+            if self.table_blacklist is not None:
+                blocked = any(
+                    (
+                        entry == full_name
+                        if "." in entry
+                        else entry == table_name
+                    )
+                    for entry in self.table_blacklist
+                )
+                if blocked:
+                    raise ValidationError(
+                        "TABLE_BLOCKED",
+                        f"Table '{display_name}' is blocked",
+                    )
