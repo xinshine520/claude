@@ -74,3 +74,43 @@
 4. 把用户的输入，生成的 SQL，以及返回的结果的一部分进行分析来确认结果是不是有意义，根据分析打个分数。10分非常 confident，0分非常不 confident。如果小于 7 分，则深度思考，重新生成 SQL，回到第 3 步。
 5. 最后根据用户的输入是返回 SQL 还是返回 SQL 查询之后的结果（默认）来返回相应的内容
 6. skill保存到当前项目 .claude/skills/pg-data 目录下
+
+
+## simple agent 构建
+
+基于 @specs/0010-simple-agent-design.md 的规范，使用 openai 构建一个 agent sdk，提供 agent 的核心功能，用户可以很方便地为 agent 添加自定义工具和 mcp。完成构建后，确保所有实现否符合 design spec，并提供几个 example 来展示如何使用（包含至少一个使用 mcp 的例子）。代码存放在 ./simple-agent 目录下
+
+## system prompt
+
+based on @specs/prompts/codex.txt and @specs/prompts/reviewer.txt think hard, we want to generate a system prompt for
+./code-review-agent which is based on @simple-agent/. The codereview agent will only have read file / write file / git command tool so make sure system prompt don't mention unexisting stuff. And make sure system prompt focused on code review but have all the good parts of @specs/prompts/codex.txt. Write the prompts down to ./code-review-agent/prompts/system.md. Think ultra hard.
+
+
+## 构建 codereview agent design spec
+
+根据 @code-review-agent/system.md 文档，以及 @simple-agent/ 代码，构建一个 codereview agent。它包含这些工具：
+
+- read file：读取当前目录下某个文件的内容
+- write file：写入当前目录下某个文件的内容
+- git command：执行 git 命令，尤其是可以根据用户的各种需求，找到合适的 git diff，包括不限于：branch diff, unstaged diff, staged diff, commit diff, pull request diff, 等等
+- gh command：执行 gh 命令，尤其是可以根据用户的各种需求，找到合适的 gh 命令，包括不限于：pr view, pr diff, 等等
+
+这些工具的使用方法，相关的例子要更新在 system.md 中，这样 LLM 可以很方便地使用这些工具。
+
+用户可以这样使用 codereview agent：
+
+- 帮我 review 当前 branch 新代码
+- 帮我 review commit 之后的代码
+- 帮我 review 最后 pull 的代码
+
+仔细考虑这些需求，构建一个 solid 的设计文档，文档放在 ./specs/0011-code-review-agent-design.md 文件中。design doc 输出中文。
+
+
+## 构建 code-review agent 代码
+
+根据 @specs/0011-code-review-agent-design.md 文档，构建一个 code-review agent 的代码（使用 ./simple-agent 作为 dependency），代码放在 ./code-review-agent 目录下。代码要完整实现 design spec，符合其要求。实现完成后请根据几个场景运行测试，确保它正常工作。
+
+
+## codex review
+
+使用 codex review skill 对 ./code-review-agent 代码进行 review，确保代码符合 ./specs/0011-code-review-agent-design.md 的设计。将 rewiew 结果写在 ./specs/0012-code-review-agent-codex-review.md 文件中。

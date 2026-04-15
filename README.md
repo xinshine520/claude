@@ -1,65 +1,58 @@
 # pg-mcp
 
-Natural language PostgreSQL query MCP server. Query your PostgreSQL databases using natural language via the Model Context Protocol (MCP).
+基于 **模型上下文协议（MCP）** 的自然语言 PostgreSQL 查询服务：用自然语言提问，由服务生成**只读、经校验**的 SQL 并返回结果。
 
-## Features
+## 功能概览
 
-- **Natural language to SQL**: Converts questions like "How many users do we have?" into safe, read-only SQL
-- **Multi-database support**: Configure multiple databases; auto-select or specify per query
-- **Schema-aware**: Automatically discovers schema and retrieves relevant tables for context
-- **Security**: SQL validation (SQLGlot AST), read-only transactions, blocked dangerous functions
-- **Optional verification**: LLM-based result verification (metadata or sample mode)
+| 能力 | 说明 |
+|------|------|
+| **自然语言 → SQL** | 例如「当前有多少用户？」→ 安全、只读的 SQL |
+| **多库** | 支持多个数据库别名；可自动选择或每次指定 |
+| **Schema 感知** | 自动发现库表结构，为生成 SQL 提供上下文 |
+| **安全** | SQLGlot AST 校验、只读事务、危险函数拦截 |
+| **可选结果校验** | LLM 对结果做校验（`metadata` / `sample` 模式） |
 
-## Quick Start
+## 快速开始
 
-### 1. Install
+### 1. 安装依赖
 
 ```bash
 cd pg-mcp
 uv sync
-# or: pip install -e ".[dev]"
+# 或：pip install -e ".[dev]"
 ```
 
-### 2. Configure
+Windows 上若已安装 [uv](https://github.com/astral-sh/uv)，在项目目录执行 `uv sync` 即可。
 
-Copy `.env.example` to `.env` and set:
+### 2. 配置环境变量
+
+复制 `.env.example` 为 `.env`，至少配置：
 
 ```bash
-# Required: database(s)
+# 必填：数据库（逗号分隔别名）
 PG_MCP_DATABASES=mydb
 PG_MCP_MYDB_URL=postgresql://user:password@localhost:5432/mydb
 
-# Required: LLM (DeepSeek / OpenAI compatible)
+# 必填：LLM（DeepSeek / OpenAI 兼容接口）
 PG_MCP_LLM_API_KEY=sk-your-api-key
 PG_MCP_LLM_BASE_URL=https://api.deepseek.com
 PG_MCP_LLM_MODEL=deepseek-chat
 ```
 
-### 3. Run
+### 3. 启动服务
 
-**stdio (default)** – for Cursor, Claude Desktop, etc.:
+| 传输方式 | 适用场景 | 命令示例 |
+|----------|----------|----------|
+| **stdio（默认）** | Cursor、Claude Desktop 等本地拉起进程 | `python -m pg_mcp` |
+| **SSE（远程）** | 需单独端口、SSE 协议 | `python -m pg_mcp --transport sse --port 8000` |
+| **HTTP / Streamable HTTP** | **推荐**：Cursor 通过 URL 连接 MCP | `python -m pg_mcp --transport http --port 18080` |
 
-```bash
-python -m pg_mcp
-```
+**为何推荐 HTTP 给 Cursor URL 模式？**  
+Cursor 期望单一端点同时处理 GET 与 POST。SSE 模式下路径分离（如 GET `/sse`、POST `/messages/`），容易出现 **POST 405 Method Not Allowed**。使用 `--transport http` 可避免该问题。
 
-**SSE (remote)**:
+### 4. 在 Cursor 中配置 MCP
 
-```bash
-python -m pg_mcp --transport sse --port 8000
-```
-
-**HTTP / Streamable HTTP (recommended for Cursor URL mode)**:
-
-```bash
-python -m pg_mcp --transport http --port 18080
-```
-
-Use `--transport http` when connecting via URL. Cursor expects a single endpoint for both GET and POST; SSE uses separate paths (`/sse` for GET, `/messages/` for POST) which can cause `405 Method Not Allowed` on POST.
-
-### 4. Cursor MCP config
-
-**stdio (spawn process)**:
+**stdio（由 Cursor 启动子进程）**：
 
 ```json
 {
@@ -77,7 +70,7 @@ Use `--transport http` when connecting via URL. Cursor expects a single endpoint
 }
 ```
 
-**URL (remote server, use `--transport http`)**:
+**URL（连接已启动的远程服务，须使用 `--transport http`）**：
 
 ```json
 {
@@ -87,70 +80,68 @@ Use `--transport http` when connecting via URL. Cursor expects a single endpoint
 }
 ```
 
-Start the server with: `uv run pg-mcp --transport http --port 18080`
-
-## Configuration Reference
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PG_MCP_DATABASES` | `""` | Comma-separated database aliases |
-| `PG_MCP_{ALIAS}_URL` | — | Connection URL for alias |
-| `PG_MCP_LLM_API_KEY` | — | LLM API key |
-| `PG_MCP_LLM_BASE_URL` | `https://api.deepseek.com` | LLM API base URL |
-| `PG_MCP_LLM_MODEL` | `deepseek-chat` | Model name |
-| `PG_MCP_STATEMENT_TIMEOUT` | `30s` | Query timeout |
-| `PG_MCP_DEFAULT_MAX_ROWS` | `100` | Max rows per result |
-| `PG_MCP_VERIFY_MODE` | `off` | `off` \| `metadata` \| `sample` |
-| `PG_MCP_LOG_LEVEL` | `INFO` | Log level |
-
-See `.env.example` for all options.
-
-## Query Tool
-
-The `query` tool accepts:
-
-- `question` (str): Natural language question
-- `database` (str, optional): Database alias; auto-selected if omitted
-- `return_mode` (str): `"result"` (default) or `"sql"`
-- `max_rows` (int): Max rows to return (default: 100)
-- `verify_result` (bool): Enable LLM verification when `verify_mode` is metadata/sample
-
-## Development
-
-### Tests
+先在本机启动服务，例如：
 
 ```bash
-# Unit tests (no Docker)
+uv run pg-mcp --transport http --port 18080
+```
+
+## 环境变量参考
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PG_MCP_DATABASES` | `""` | 数据库别名，逗号分隔 |
+| `PG_MCP_{ALIAS}_URL` | — | 别名对应连接串 |
+| `PG_MCP_LLM_API_KEY` | — | LLM API Key |
+| `PG_MCP_LLM_BASE_URL` | `https://api.deepseek.com` | LLM Base URL |
+| `PG_MCP_LLM_MODEL` | `deepseek-chat` | 模型名 |
+| `PG_MCP_STATEMENT_TIMEOUT` | `30s` | 查询超时 |
+| `PG_MCP_DEFAULT_MAX_ROWS` | `100` | 单次返回最大行数 |
+| `PG_MCP_VERIFY_MODE` | `off` | `off` \| `metadata` \| `sample` |
+| `PG_MCP_LOG_LEVEL` | `INFO` | 日志级别 |
+
+更多项见仓库内 `.env.example`。
+
+## `query` 工具参数
+
+- `question`（字符串）：自然语言问题  
+- `database`（可选）：数据库别名；省略时可自动选择  
+- `return_mode`：`"result"`（默认）或 `"sql"`  
+- `max_rows`（整数）：最大返回行数（默认 100）  
+- `verify_result`（布尔）：在 `verify_mode` 为 `metadata` / `sample` 时是否启用 LLM 校验  
+
+## 开发与测试
+
+```bash
+# 单元测试（无需 Docker）
 uv run pytest -m "not integration"
 
-# Integration tests (require Docker PostgreSQL)
+# 集成测试（需要本机 Docker PostgreSQL）
 uv run pytest -m integration
 
-# E2E tests (Docker + seed)
+# E2E（Docker + 种子数据）
 docker compose -f tests/docker-compose.yml up -d
 psql $PG_MCP_E2E_DSN -f tests/fixtures/seed.sql
 uv run pytest -m e2e
 ```
 
-### Fixtures
+测试库与数据规模说明见 `fixtures/README.md`。
 
-See `fixtures/README.md` for test database setup (small, medium, large).
+## 高级能力（Phase 9–11）
 
-## Advanced Features (Phase 9–11)
+### Phase 9：按库安全策略
 
-### Phase 9: Per-Database Security Control
+每个数据库可通过环境变量单独限制访问范围：
 
-Each database can have its own access rules via environment variables:
+| 变量 | 格式 | 说明 |
+|------|------|------|
+| `PG_MCP_{ALIAS}_ALLOWED_SCHEMAS` | 逗号分隔 | 覆盖全局 `search_path`，如 `analytics,reporting` |
+| `PG_MCP_{ALIAS}_ALLOWED_TABLES` | 逗号分隔 | 白名单：仅允许访问这些表 |
+| `PG_MCP_{ALIAS}_DENIED_TABLES` | 逗号分隔 | 黑名单：禁止访问的表 |
+| `PG_MCP_{ALIAS}_ALLOW_EXPLAIN` | `true` / `false` | 是否允许 `EXPLAIN`（默认 `false`） |
+| `PG_MCP_{ALIAS}_MAX_ROWS_OVERRIDE` | 整数 | 单库行数上限覆盖 |
 
-| Variable | Format | Description |
-|----------|--------|-------------|
-| `PG_MCP_{ALIAS}_ALLOWED_SCHEMAS` | Comma-separated | Override global `search_path` (e.g. `analytics,reporting`) |
-| `PG_MCP_{ALIAS}_ALLOWED_TABLES` | Comma-separated | Whitelist: only these tables can be accessed (e.g. `users,orders`) |
-| `PG_MCP_{ALIAS}_DENIED_TABLES` | Comma-separated | Blacklist: these tables are blocked (e.g. `secrets,audit_log`) |
-| `PG_MCP_{ALIAS}_ALLOW_EXPLAIN` | `true`/`false` | Allow `EXPLAIN` (default: `false`) |
-| `PG_MCP_{ALIAS}_MAX_ROWS_OVERRIDE` | Integer | Per-db row limit override |
-
-**Example `.env`** (database `analytics` with strict access):
+**示例**（`analytics` 严格只读部分表，`readonly` 库禁止敏感表）：
 
 ```bash
 PG_MCP_DATABASES=analytics,readonly
@@ -164,37 +155,29 @@ PG_MCP_READONLY_DENIED_TABLES=secrets,passwords
 PG_MCP_READONLY_ALLOW_EXPLAIN=true
 ```
 
----
+### Phase 10：韧性可观测
 
-### Phase 10: Resilience & Observability
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PG_MCP_RATE_LIMIT_RPM` | `60` | 每分钟最大请求数（`0` 或负数表示关闭） |
+| `PG_MCP_LLM_MAX_RETRIES` | `3` | LLM 遇 429 / 5xx 时最大重试次数 |
+| `PG_MCP_LLM_RETRY_BASE_DELAY` | `1.0` | 指数退避基准秒数 |
+| `PG_MCP_METRICS_ENABLED` | `true` | 通过 structlog 输出流水线指标 |
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PG_MCP_RATE_LIMIT_RPM` | `60` | Max requests per minute (0 or negative = disabled) |
-| `PG_MCP_LLM_MAX_RETRIES` | `3` | Max retries for 429/5xx LLM errors |
-| `PG_MCP_LLM_RETRY_BASE_DELAY` | `1.0` | Base delay (seconds) for exponential backoff |
-| `PG_MCP_METRICS_ENABLED` | `true` | Emit pipeline metrics via structlog |
+**行为摘要**：
 
-**Behavior:**
+- **限流**：滑动窗口；超限返回 `RateLimitError`（阶段 `rate_limit`）。  
+- **LLM 重试**：429 或 5xx 时指数退避（1s → 2s → 4s …，上限 30s）；4xx 客户端错误不重试。  
+- **指标**：开启后每条请求记录 `pipeline_metrics`（含各阶段耗时，如 `ensure_schema_loaded`、`generate_sql`、`execute_sql`）。需将 `LOG_LEVEL` 设为 `INFO` 或 `DEBUG` 以便在日志中查看。  
 
-- **Rate limiting**: Sliding-window; over-limit requests return `RateLimitError` (stage `rate_limit`).
-- **LLM retry**: On 429 (rate limit) or 5xx (server error), LLM calls retry with exponential backoff (1s → 2s → 4s …, cap 30s). 4xx (client error) are not retried.
-- **Metrics**: When enabled, each request logs a `pipeline_metrics` event with stage durations (e.g. `ensure_schema_loaded`, `generate_sql`, `execute_sql`). Ensure `LOG_LEVEL=INFO` or `DEBUG` to see them.
+### Phase 11：模型与测试
 
----
+内部改进（响应序列化、测试覆盖等），**无新增用户可配项**。
 
-### Phase 11: Model & Test Improvements
+## 安全说明：SSE 与 Bearer Token
 
-Internal changes only (no new config): response model serialization fixes and higher test coverage. No user-facing configuration.
+在 **SSE** 模式（`--transport sse`）下，配置项 `PG_MCP_ACCESS_TOKEN` 存在，但**应用层未实现强制校验**。生产环境建议在 **反向代理**（如 nginx、Caddy）上完成 Bearer Token 校验，再转发到本服务。
 
----
-
-## Security Notes
-
-### SSE Mode and Bearer Token Authentication
-
-When running in SSE mode (`--transport sse`), the `PG_MCP_ACCESS_TOKEN` config field is available but token enforcement is not implemented at the application level. For production deployments, use a reverse proxy (e.g., nginx, Caddy) to enforce Bearer token authentication before requests reach the server.
-
-## License
+## 许可证
 
 MIT
